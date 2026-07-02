@@ -38,3 +38,8 @@ externalPort = 80
 deploymentTarget = "static"
 build = ["npm", "run", "build"]
 publicDir = "dist"
+
+[userenv]
+
+[userenv.shared]
+NEXT_PUBLIC_DERIV_APP_ID = "33CgtWLy6MV5q6iYjy3Y4"
