@@ -165,11 +165,15 @@
 
                 &--main {
                     &__tabs {
-                        display: flex;
-                        justify-content: space-between;
+                        width: 100%;
+                        display: block;
+
+                        > * {
+                            width: 100%;
+                            box-sizing: border-box;
+                        }
 
                         @include mobile-or-tablet-screen {
-                            flex-direction: column;
                             background-color: var(--general-section-1);
                         }
                     }
