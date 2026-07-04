@@ -67,6 +67,9 @@
             &--padding {
                 padding-inline-start: 4.8rem;
                 padding-inline-end: 1.6rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.4rem;
             }
 
             &--bottom-border {
