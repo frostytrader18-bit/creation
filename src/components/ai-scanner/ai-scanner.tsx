@@ -3,80 +3,15 @@ import { useStore } from '@/hooks/useStore';
 import { DBOT_TABS } from '@/constants/bot-contents';
 import { load } from '@/external/bot-skeleton';
 import { save_types } from '@/external/bot-skeleton/constants/save-type';
-import { scanMarkets, ScanResult, Strategy, ScanProgress } from './ai-scanner-service';
+import { scanMarkets, ScanResult, ScanProgress, UnifiedScanOutput } from './ai-scanner-service';
 import './ai-scanner.scss';
 
-// ─── strategy config ──────────────────────────────────────────────────────────
-
-type StrategyConfig = {
-    id: Strategy;
-    label: string;
-    title: string;
-    description: string;
-    contractType: string;   // read-only display value
-    tradeTypeName: string;  // read-only display value
-    predictionDigit: number | null; // null for even/odd (direction from scanner)
-    xmlFile: string;
-    botName: string;
-};
-
-const STRATEGIES: StrategyConfig[] = [
-    {
-        id: 'over1under8',
-        label: 'Over1/Under8',
-        title: 'Over 1 / Under 8',
-        description: 'Scanner picks the best market. Bot trades Over 1; recovers to Under 8 on loss.',
-        contractType: 'Over / Under',
-        tradeTypeName: 'Digits',
-        predictionDigit: 1,
-        xmlFile: 'frosty_over_under_ai_bot',
-        botName: 'Frosty Over/Under AI Bot',
-    },
-    {
-        id: 'over2under7',
-        label: 'Over2/Under7',
-        title: 'Over 2 / Under 7',
-        description: 'Scanner picks the best market. Bot trades Over 2; recovers to Under 7 on loss.',
-        contractType: 'Over / Under',
-        tradeTypeName: 'Digits',
-        predictionDigit: 2,
-        xmlFile: 'frosty_over_under_ai_bot',
-        botName: 'Frosty Over/Under AI Bot',
-    },
-    {
-        id: 'over3under6',
-        label: 'Over3/Under6',
-        title: 'Over 3 / Under 6',
-        description: 'Scanner picks the best market. Bot trades Over 3; recovers to Under 6 on loss.',
-        contractType: 'Over / Under',
-        tradeTypeName: 'Digits',
-        predictionDigit: 3,
-        xmlFile: 'frosty_over_under_ai_bot',
-        botName: 'Frosty Over/Under AI Bot',
-    },
-    {
-        id: 'evenodd',
-        label: 'Even/Odd',
-        title: 'Even / Odd',
-        description: 'Scanner picks the best market and direction (Even or Odd) based on digit frequency.',
-        contractType: 'Even / Odd',
-        tradeTypeName: 'Digits',
-        predictionDigit: null,
-        xmlFile: 'frosty_even_odd_ai_bot',
-        botName: 'Frosty Even/Odd AI Bot',
-    },
-];
+// ─── types ────────────────────────────────────────────────────────────────────
 
 type ScanState = 'idle' | 'scanning' | 'done' | 'error';
 
 // ─── XML injection helpers ────────────────────────────────────────────────────
 
-/**
- * Replaces the initialisation value of a Blockly variable in an XML string.
- * Finds the first `<field name="VAR" id="${varId}">` then lazily scans to the
- * first `<field name="NUM">` — which, inside a variables_set init block, is
- * always the initial numeric value.
- */
 function replaceVarInit(xml: string, varId: string, value: number): string {
     const escaped = varId.replace(/[.*+?^${}()|[\]\\`]/g, '\\$&');
     return xml.replace(
@@ -91,67 +26,40 @@ type InjectOpts = {
     martingale: number;
     takeProfit: number;
     stopLoss: number;
-    predictionDigit?: number;  // over/under only
-    tradeType?: string;        // scanner-determined direction ("Over 1", "Under 8", "Even", "Odd")
-    entryPoint?: number;       // digit the bot waits for before triggering a trade
+    tradeType: string;
+    entryPoint?: number;
 };
 
 function injectOverUnderParams(xml: string, opts: InjectOpts): string {
     xml = xml.replace(/(<field name="SYMBOL_LIST">)[^<]+/, `$1${opts.symbol}`);
 
-    // Resolve digit and purchase direction from the scanner's tradeType string
-    // (e.g. "Over 1" → digit=1, DIGITOVER; "Under 8" → digit=8, DIGITUNDER).
-    // Previously the bot always loaded with the strategy's fixed predictionDigit
-    // and DIGITOVER, ignoring what the scanner actually determined.
-    let digit = opts.predictionDigit;
+    let digit: number | undefined;
     let purchase = 'DIGITOVER';
-    if (opts.tradeType) {
-        const m = opts.tradeType.trim().match(/^(Over|Under)\s+(\d+)$/i);
-        if (m) {
-            digit = parseInt(m[2], 10);
-            purchase = m[1].toLowerCase() === 'under' ? 'DIGITUNDER' : 'DIGITOVER';
-        } else {
-            // eslint-disable-next-line no-console
-            console.warn(`[AiScanner] Could not parse tradeType "${opts.tradeType}" — falling back to default digit/direction.`);
-        }
+    const m = opts.tradeType.trim().match(/^(Over|Under)\s+(\d+)$/i);
+    if (m) {
+        digit    = parseInt(m[2], 10);
+        purchase = m[1].toLowerCase() === 'under' ? 'DIGITUNDER' : 'DIGITOVER';
     }
 
-    // VAR id: a6O1@UOPwLx_RSp+20T$  (prediction digit)
-    if (digit !== undefined) {
-        xml = replaceVarInit(xml, 'a6O1@UOPwLx_RSp+20T$', digit);
-    }
-    // VAR id: e.`,j$8^KyE-2P_|[+x8  (ENTRY POINT — digit the bot watches before trading)
-    if (opts.entryPoint !== undefined) {
-        xml = replaceVarInit(xml, 'e.`,j$8^KyE-2P_|[+x8', opts.entryPoint);
-    }
-    // Flip ALL PURCHASE_LIST fields (the XML has 3 occurrences, all DIGITOVER by default)
+    if (digit !== undefined) xml = replaceVarInit(xml, 'a6O1@UOPwLx_RSp+20T$', digit);
+    if (opts.entryPoint !== undefined) xml = replaceVarInit(xml, 'e.`,j$8^KyE-2P_|[+x8', opts.entryPoint);
     xml = xml.replace(/(<field name="PURCHASE_LIST">)DIGIT(?:OVER|UNDER)/g, `$1${purchase}`);
-
-    // VAR id: 9dQ4tsj$@`vWpu;:2{K=  (STAKE)
-    xml = replaceVarInit(xml, '9dQ4tsj$@`vWpu;:2{K=', opts.stake);
-    // VAR id: /D.KK%;1:%C[vPyr}FX9  (MARTINGALE)
-    xml = replaceVarInit(xml, '/D.KK%;1:%C[vPyr}FX9', opts.martingale);
-    // VAR id: :Fbza.{0*q*jalJ+tc#.  (TAKE PROFIT)
-    xml = replaceVarInit(xml, ':Fbza.{0*q*jalJ+tc#.', opts.takeProfit);
-    // VAR id: BTQ{$u318X:bRnhP(mQ9  (STOP LOSS)
-    xml = replaceVarInit(xml, 'BTQ{$u318X:bRnhP(mQ9', opts.stopLoss);
+    xml = replaceVarInit(xml, '9dQ4tsj$@`vWpu;:2{K=',  opts.stake);
+    xml = replaceVarInit(xml, '/D.KK%;1:%C[vPyr}FX9',  opts.martingale);
+    xml = replaceVarInit(xml, ':Fbza.{0*q*jalJ+tc#.',  opts.takeProfit);
+    xml = replaceVarInit(xml, 'BTQ{$u318X:bRnhP(mQ9',  opts.stopLoss);
     return xml;
 }
 
 function injectEvenOddParams(xml: string, opts: InjectOpts): string {
     if (opts.tradeType !== 'Even' && opts.tradeType !== 'Odd') {
-        throw new Error(`[AiScanner] Invalid even/odd trade direction: "${opts.tradeType}". Expected "Even" or "Odd".`);
+        throw new Error(`[AiScanner] Invalid even/odd direction: "${opts.tradeType}"`);
     }
     xml = xml.replace(/(<field name="SYMBOL_LIST">)[^<]+/, `$1${opts.symbol}`);
-    // VAR id: xd#F6X!PKV4M@A!Ya@5R  (stake)
     xml = replaceVarInit(xml, 'xd#F6X!PKV4M@A!Ya@5R', opts.stake);
-    // VAR id: I=[4-i8Yh!8yyyJ@i`3I  (martingale)
     xml = replaceVarInit(xml, 'I=[4-i8Yh!8yyyJ@i`3I', opts.martingale);
-    // VAR id: 1:(EhN=[H:b-?Xr#{Df+  (take_profit)
     xml = replaceVarInit(xml, '1:(EhN=[H:b-?Xr#{Df+', opts.takeProfit);
-    // VAR id: rXm$y.Rn8Ec_$@!MDo^e  (stop_loss)
     xml = replaceVarInit(xml, 'rXm$y.Rn8Ec_$@!MDo^e', opts.stopLoss);
-    // Purchase direction (Even → DIGITEVEN, Odd → DIGITODD)
     const purchase = opts.tradeType === 'Even' ? 'DIGITEVEN' : 'DIGITODD';
     xml = xml.replace(/(<field name="PURCHASE_LIST">)[^<]+/, `$1${purchase}`);
     return xml;
@@ -164,16 +72,16 @@ const AiScanner = () => {
 
     // ── drag state ───────────────────────────────────────────────────────────
     const [pos, setPos] = useState({ right: 24, bottom: 120 });
-    const isDragging = useRef(false);
-    const hasDragged = useRef(false);
-    const dragStart = useRef({ x: 0, y: 0, right: 0, bottom: 0 });
-    const btnRef = useRef<HTMLButtonElement>(null);
+    const isDragging  = useRef(false);
+    const hasDragged  = useRef(false);
+    const dragStart   = useRef({ x: 0, y: 0, right: 0, bottom: 0 });
+    const btnRef      = useRef<HTMLButtonElement>(null);
 
     const onPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
         if (e.button !== 0 && e.pointerType !== 'touch') return;
-        isDragging.current = true;
-        hasDragged.current = false;
-        dragStart.current = { x: e.clientX, y: e.clientY, right: pos.right, bottom: pos.bottom };
+        isDragging.current  = true;
+        hasDragged.current  = false;
+        dragStart.current   = { x: e.clientX, y: e.clientY, right: pos.right, bottom: pos.bottom };
         btnRef.current?.setPointerCapture(e.pointerId);
     }, [pos]);
 
@@ -191,57 +99,34 @@ const AiScanner = () => {
     }, []);
 
     // ── scanner state ─────────────────────────────────────────────────────────
-    const [isOpen, setIsOpen] = useState(false);
-    const [activeStrategyIdx, setActiveStrategyIdx] = useState(0);
-    const [ticks, setTicks] = useState(3000);
-    const [scanState, setScanState] = useState<ScanState>('idle');
-    const [progress, setProgress] = useState<ScanProgress | null>(null);
-    const [results, setResults] = useState<ScanResult[]>([]);
-    const [statusMsg, setStatusMsg] = useState('');
+    const [isOpen,     setIsOpen]     = useState(false);
+    const [ticks,      setTicks]      = useState(3000);
+    const [scanState,  setScanState]  = useState<ScanState>('idle');
+    const [progress,   setProgress]   = useState<ScanProgress | null>(null);
+    const [output,     setOutput]     = useState<UnifiedScanOutput | null>(null);
+    const [statusMsg,  setStatusMsg]  = useState('');
 
-    // ── editable bot parameters ───────────────────────────────────────────────
-    const [stake, setStake] = useState(1);
+    // ── bot parameters ────────────────────────────────────────────────────────
+    const [stake,      setStake]      = useState(1);
     const [martingale, setMartingale] = useState(1.5);
     const [takeProfit, setTakeProfit] = useState(5);
-    const [stopLoss, setStopLoss] = useState(10);
+    const [stopLoss,   setStopLoss]   = useState(10);
 
     const abortRef = useRef<AbortController | null>(null);
-    const strategy = STRATEGIES[activeStrategyIdx];
 
-    useEffect(() => {
-        if (scanState === 'scanning') abortRef.current?.abort();
-        setScanState('idle');
-        setResults([]);
-        setProgress(null);
-        setStatusMsg('');
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeStrategyIdx]);
+    const bestResult: ScanResult | null = output?.best ?? null;
 
-    // ── best result (auto-selected #1) ───────────────────────────────────────
-    const bestResult: ScanResult | null = results[0] ?? null;
+    const progressPct = progress && progress.total > 0
+        ? Math.round(((progress.index + 1) / progress.total) * 100)
+        : 0;
 
-    // ── AI-determined display values ──────────────────────────────────────────
-    const aiMarket = scanState === 'done' && bestResult ? bestResult.name : '—';
-    // "Digits" is the Deriv trade-type category for both bot types
-    const aiTradeType = scanState === 'done' && bestResult ? strategy.tradeTypeName : '—';
-    const aiContractType = scanState === 'done' && bestResult ? strategy.contractType : '—';
-    // Show exactly what the scanner determined — "Over 1"/"Under 8" for digits
-    // strategies, "Even"/"Odd" for the even-odd strategy.
-    const aiPrediction = scanState === 'done' && bestResult ? bestResult.tradeType : '—';
-    // Entry point: the digit the bot waits to see before triggering a trade
-    // Entry point only exists for Over/Under strategies; show — for Even/Odd.
-    const aiEntryPoint  = scanState === 'done' && bestResult && bestResult.entryPoint !== undefined
-        ? String(bestResult.entryPoint)
-        : '—';
-
-    const progressPct =
-        progress && progress.total > 0 ? Math.round(((progress.index + 1) / progress.total) * 100) : 0;
-
-    function statusFor(state: ScanState, prog: ScanProgress | null, res: ScanResult[]): string {
+    function statusFor(state: ScanState, prog: ScanProgress | null, out: UnifiedScanOutput | null): string {
         switch (state) {
-            case 'idle':     return `Ready — set parameters and scan`;
+            case 'idle':     return 'Ready — set parameters and scan';
             case 'scanning': return prog ? `Scanning ${prog.symbol} (${prog.index + 1}/${prog.total})…` : 'Starting…';
-            case 'done':     return res.length === 0 ? 'No results — check connection.' : `Best: ${res[0].name} — ${res[0].tradeType} (${res[0].percentage})`;
+            case 'done':     return out?.best
+                ? `Best: ${out.best.name} — ${out.best.tradeType} (${out.best.percentage})`
+                : 'No results — check connection.';
             case 'error':    return 'Scan failed. Check connection and retry.';
         }
     }
@@ -256,49 +141,55 @@ const AiScanner = () => {
         if (scanState === 'scanning') {
             abortRef.current?.abort();
             setScanState('idle');
-            setStatusMsg(statusFor('idle', null, []));
+            setStatusMsg(statusFor('idle', null, null));
             return;
         }
         const ctrl = new AbortController();
         abortRef.current = ctrl;
         setScanState('scanning');
-        setResults([]);
+        setOutput(null);
         setProgress(null);
         setStatusMsg('Starting scan…');
         try {
-            const res = await scanMarkets(strategy.id, ticks, p => {
+            const result = await scanMarkets(ticks, p => {
                 setProgress(p);
-                setStatusMsg(statusFor('scanning', p, []));
+                setStatusMsg(statusFor('scanning', p, null));
             }, ctrl.signal);
             if (ctrl.signal.aborted) return;
-            setResults(res);
+            setOutput(result);
             setScanState('done');
-            setStatusMsg(statusFor('done', null, res));
+            setStatusMsg(statusFor('done', null, result));
         } catch {
             if (ctrl.signal.aborted) return;
             setScanState('error');
-            setStatusMsg(statusFor('error', null, []));
+            setStatusMsg(statusFor('error', null, null));
         }
     };
 
     const buildAndLoadBot = async (): Promise<void> => {
         if (!bestResult) return;
 
-        const xml_module = await import(`../../xml/${strategy.xmlFile}.xml`);
+        const xmlFile = bestResult.contractGroup === 'evenodd'
+            ? 'frosty_even_odd_ai_bot'
+            : 'frosty_over_under_ai_bot';
+        const botName = bestResult.contractGroup === 'evenodd'
+            ? 'Frosty Even/Odd AI Bot'
+            : 'Frosty Over/Under AI Bot';
+
+        const xml_module = await import(`../../xml/${xmlFile}.xml`);
         let block_string: string = xml_module.default;
 
         const opts: InjectOpts = {
-            symbol: bestResult.symbol,
+            symbol:    bestResult.symbol,
             stake,
             martingale,
             takeProfit,
             stopLoss,
-            predictionDigit: strategy.predictionDigit ?? undefined,
             tradeType: bestResult.tradeType,
             entryPoint: bestResult.entryPoint,
         };
 
-        block_string = strategy.id === 'evenodd'
+        block_string = bestResult.contractGroup === 'evenodd'
             ? injectEvenOddParams(block_string, opts)
             : injectOverUnderParams(block_string, opts);
 
@@ -309,7 +200,7 @@ const AiScanner = () => {
             await load({
                 block_string,
                 workspace,
-                file_name: strategy.botName,
+                file_name: botName,
                 from: save_types.LOCAL,
                 show_snackbar: true,
                 drop_event: undefined,
@@ -333,25 +224,15 @@ const AiScanner = () => {
     };
 
     const handleLoadBot = async () => {
-        try {
-            await buildAndLoadBot();
-        } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[AiScanner] Failed to load bot XML:', err);
-        }
+        try { await buildAndLoadBot(); }
+        catch (err) { console.error('[AiScanner] Failed to load bot XML:', err); }
     };
 
     const handleLoadAndRun = async () => {
         try {
             await buildAndLoadBot();
-            // Give the workspace a moment to fully initialise before running
-            setTimeout(() => {
-                store?.run_panel?.onRunButtonClick?.();
-            }, 600);
-        } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[AiScanner] Failed to load and run bot:', err);
-        }
+            setTimeout(() => { store?.run_panel?.onRunButtonClick?.(); }, 600);
+        } catch (err) { console.error('[AiScanner] Failed to load and run bot:', err); }
     };
 
     const handleClose = () => {
@@ -359,15 +240,29 @@ const AiScanner = () => {
         setIsOpen(false);
     };
 
-    // ── number field helpers ──────────────────────────────────────────────────
-    const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(max, val));
+    const clamp    = (val: number, min: number, max: number) => Math.max(min, Math.min(max, val));
     const parseNum = (s: string, fallback: number) => { const n = parseFloat(s); return isNaN(n) ? fallback : n; };
 
     const modalStyle: React.CSSProperties = {
         position: 'fixed',
         bottom: pos.bottom + 64,
-        right: pos.right,
+        right:  pos.right,
     };
+
+    // Derived display values
+    const isDone  = scanState === 'done' && !!bestResult;
+    const aiMarket        = isDone ? bestResult!.name       : '—';
+    const aiContractType  = isDone
+        ? (bestResult!.contractGroup === 'evenodd' ? 'Even / Odd' : 'Over / Under')
+        : '—';
+    const aiPrediction    = isDone ? bestResult!.tradeType  : '—';
+    const aiPercentage    = isDone ? bestResult!.percentage : '—';
+    const aiEntryPoint    = isDone && bestResult!.entryPoint !== undefined
+        ? String(bestResult!.entryPoint)
+        : '—';
+    const sourceLabel     = isDone
+        ? (output!.used1s ? '1s volatility' : 'standard volatility')
+        : '';
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -386,7 +281,6 @@ const AiScanner = () => {
                 title='AI Entry Scanner'
                 touch-action='none'
             >
-                {/* Wave rings — three expanding halos */}
                 <span className='ai-scanner-trigger__wave' aria-hidden='true' />
                 <span className='ai-scanner-trigger__wave' aria-hidden='true' />
                 <span className='ai-scanner-trigger__wave' aria-hidden='true' />
@@ -397,7 +291,7 @@ const AiScanner = () => {
             {isOpen && <div className='ai-scanner-backdrop' onClick={handleClose} />}
 
             {isOpen && (
-                <div className='ai-scanner-modal' style={modalStyle} role='dialog' aria-label='Entry Scanner'>
+                <div className='ai-scanner-modal' style={modalStyle} role='dialog' aria-label='AI Entry Scanner'>
 
                     {/* ── Header ───────────────────────────────────────────── */}
                     <div className='ai-scanner-modal__header'>
@@ -405,27 +299,20 @@ const AiScanner = () => {
                         <button className='ai-scanner-modal__close' onClick={handleClose} aria-label='Close'>✕</button>
                     </div>
 
-                    {/* ── Strategy tabs ─────────────────────────────────────── */}
-                    <div className='ai-scanner-modal__tabs'>
-                        {STRATEGIES.map((s, idx) => (
-                            <button
-                                key={s.id}
-                                className={`ai-scanner-modal__tab${idx === activeStrategyIdx ? ' ai-scanner-modal__tab--active' : ''}`}
-                                onClick={() => setActiveStrategyIdx(idx)}
-                            >
-                                {s.label}
-                            </button>
-                        ))}
+                    {/* ── Description ──────────────────────────────────────── */}
+                    <div className='ai-scanner-modal__description'>
+                        Scans all volatilities across <strong>Over/Under</strong> and <strong>Even/Odd</strong> simultaneously.
+                        Returns the single strongest signal — 1s volatilities have priority.
                     </div>
 
                     {/* ── Body ─────────────────────────────────────────────── */}
                     <div className='ai-scanner-modal__body'>
 
-                        {/* Strategy info + ticks */}
+                        {/* Tick count */}
                         <div className='ai-scanner-modal__strategy-header'>
                             <div className='ai-scanner-modal__strategy-info'>
-                                <h4>{strategy.title}</h4>
-                                <p>{strategy.description}</p>
+                                <h4>Unified Contract Scanner</h4>
+                                <p>Auto-detects best contract type &amp; market.</p>
                             </div>
                             <div className='ai-scanner-modal__ticks'>
                                 <label>TICKS</label>
@@ -438,7 +325,7 @@ const AiScanner = () => {
                             </div>
                         </div>
 
-                        {/* ── Bot Parameters (editable) ──────────────────── */}
+                        {/* ── Bot Parameters ────────────────────────────────── */}
                         <div className='ai-scanner-modal__section-label'>BOT PARAMETERS</div>
                         <div className='ai-scanner-modal__params'>
                             <div className='ai-scanner-modal__param'>
@@ -479,29 +366,59 @@ const AiScanner = () => {
                             </div>
                         </div>
 
-                        {/* ── AI Scanner Results (read-only) ─────────────── */}
-                        <div className='ai-scanner-modal__section-label'>AI SCANNER RESULTS</div>
-                        <div className='ai-scanner-modal__fields'>
-                            <div className='ai-scanner-modal__field'>
-                                <label>MARKET</label>
-                                <span className={scanState === 'done' && bestResult ? 'ai-scanner-modal__field-value--ai' : ''} title={aiMarket}>{aiMarket}</span>
+                        {/* ── AI Scanner Results ────────────────────────────── */}
+                        <div className='ai-scanner-modal__section-label'>
+                            AI SCANNER RESULTS
+                            {isDone && (
+                                <span className={`ai-scanner-modal__source-badge${output!.used1s ? ' ai-scanner-modal__source-badge--1s' : ''}`}>
+                                    {sourceLabel}
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Best-signal card */}
+                        <div className={`ai-scanner-modal__best-card${isDone ? ' ai-scanner-modal__best-card--active' : ''}`}>
+                            <div className='ai-scanner-modal__best-card-row'>
+                                <div className='ai-scanner-modal__field'>
+                                    <label>MARKET</label>
+                                    <span className={isDone ? 'ai-scanner-modal__field-value--ai' : ''} title={aiMarket}>
+                                        {aiMarket}
+                                    </span>
+                                </div>
+                                <div className='ai-scanner-modal__field'>
+                                    <label>CONTRACT TYPE</label>
+                                    <span className={isDone ? 'ai-scanner-modal__field-value--ai' : ''}>
+                                        {aiContractType}
+                                    </span>
+                                </div>
                             </div>
-                            <div className='ai-scanner-modal__field'>
-                                <label>TRADE TYPE</label>
-                                <span>{aiTradeType}</span>
+                            <div className='ai-scanner-modal__best-card-row'>
+                                <div className='ai-scanner-modal__field'>
+                                    <label>PREDICTION</label>
+                                    <span className={isDone ? 'ai-scanner-modal__field-value--ai ai-scanner-modal__field-value--prediction' : ''}>
+                                        {aiPrediction}
+                                    </span>
+                                </div>
+                                <div className='ai-scanner-modal__field'>
+                                    <label>WIN RATE</label>
+                                    <span className={isDone ? 'ai-scanner-modal__field-value--ai ai-scanner-modal__field-value--rate' : ''}>
+                                        {aiPercentage}
+                                    </span>
+                                </div>
                             </div>
-                            <div className='ai-scanner-modal__field'>
-                                <label>CONTRACT TYPE</label>
-                                <span className={scanState === 'done' && bestResult ? 'ai-scanner-modal__field-value--ai' : ''}>{aiContractType}</span>
-                            </div>
-                            <div className='ai-scanner-modal__field'>
-                                <label>PREDICTION</label>
-                                <span className={scanState === 'done' && bestResult ? 'ai-scanner-modal__field-value--ai' : ''}>{aiPrediction}</span>
-                            </div>
-                            <div className='ai-scanner-modal__field'>
-                                <label>ENTRY POINT</label>
-                                <span className={scanState === 'done' && bestResult ? 'ai-scanner-modal__field-value--ai' : ''} title='Last digit the bot waits for before placing a trade'>{aiEntryPoint}</span>
-                            </div>
+                            {isDone && bestResult!.contractGroup === 'overunder' && (
+                                <div className='ai-scanner-modal__best-card-row'>
+                                    <div className='ai-scanner-modal__field'>
+                                        <label>ENTRY POINT</label>
+                                        <span
+                                            className={isDone ? 'ai-scanner-modal__field-value--ai' : ''}
+                                            title='Last digit the bot watches before placing a trade'
+                                        >
+                                            {aiEntryPoint}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Progress bar */}
@@ -514,28 +431,8 @@ const AiScanner = () => {
                         {/* Status */}
                         <div className={`ai-scanner-modal__status${scanState !== 'idle' ? ` ai-scanner-modal__status--${scanState}` : ''}`}>
                             {scanState === 'scanning' && <div className='ai-scanner-spinner' />}
-                            {statusMsg || statusFor(scanState, progress, results)}
+                            {statusMsg || statusFor(scanState, progress, output)}
                         </div>
-
-                        {/* Ranked results list */}
-                        {results.length > 0 && (
-                            <div className='ai-scanner-modal__results'>
-                                {results.map((r, idx) => (
-                                    <div
-                                        key={r.symbol}
-                                        className={[
-                                            'ai-scanner-modal__result-row',
-                                            idx === 0 ? 'ai-scanner-modal__result-row--best' : '',
-                                        ].filter(Boolean).join(' ')}
-                                    >
-                                        <span className='ai-scanner-modal__result-rank'>#{idx + 1}</span>
-                                        <span className='ai-scanner-modal__result-name'>{r.name}</span>
-                                        <span className='ai-scanner-modal__result-type'>{r.tradeType}</span>
-                                        <span className='ai-scanner-modal__result-pct'>{r.percentage}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
 
                         {/* Action buttons */}
                         <div className='ai-scanner-modal__actions'>

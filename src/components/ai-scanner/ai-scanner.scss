@@ -285,6 +285,93 @@
         }
     }
 
+    // ── Description strip ────────────────────────────────────────────────────
+
+    &__description {
+        font-size: 1.1rem;
+        color: rgba(245, 158, 11, 0.55);
+        padding: 0.75rem 1.6rem;
+        background: rgba(245, 158, 11, 0.04);
+        border-bottom: 1px solid rgba(245, 158, 11, 0.12);
+        line-height: 1.5;
+
+        strong {
+            color: rgba(245, 158, 11, 0.85);
+            font-weight: 700;
+        }
+    }
+
+    // ── Source badge (1s / standard) ─────────────────────────────────────────
+
+    &__source-badge {
+        display: inline-block;
+        margin-left: 0.6rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 2rem;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: none;
+        vertical-align: middle;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(245, 158, 11, 0.25);
+        color: rgba(245, 158, 11, 0.6);
+
+        &--1s {
+            background: rgba(110, 231, 183, 0.12);
+            border-color: rgba(16, 185, 129, 0.45);
+            color: #6ee7b7;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+        }
+    }
+
+    // ── Best-signal card ─────────────────────────────────────────────────────
+
+    &__best-card {
+        border: 1.5px solid rgba(245, 158, 11, 0.15);
+        border-radius: 0.9rem;
+        background: rgba(245, 158, 11, 0.03);
+        padding: 0.9rem 1rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        transition: border-color 0.2s, box-shadow 0.2s;
+
+        &--active {
+            border-color: rgba(245, 158, 11, 0.45);
+            background: rgba(245, 158, 11, 0.06);
+            box-shadow: 0 0 18px rgba(245, 158, 11, 0.1), inset 0 1px 0 rgba(253,230,138,0.07);
+        }
+    }
+
+    &__best-card-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.7rem;
+
+        // Single-field rows stretch full width
+        &:only-child,
+        > .ai-scanner-modal__field:only-child {
+            grid-column: 1 / -1;
+        }
+    }
+
+    // ── Special value highlights inside best card ─────────────────────────────
+
+    &__field-value--prediction {
+        font-size: 1.25rem !important;
+        letter-spacing: 0.02em;
+    }
+
+    &__field-value--rate {
+        font-size: 1.25rem !important;
+        color: #6ee7b7 !important;
+        text-shadow: 0 0 10px rgba(16, 185, 129, 0.45) !important;
+        border-color: rgba(16, 185, 129, 0.35) !important;
+        background: rgba(16, 185, 129, 0.08) !important;
+    }
+
     // ── Tabs ────────────────────────────────────────────────────────────────
 
     &__tabs {
