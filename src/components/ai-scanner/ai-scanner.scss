@@ -79,6 +79,10 @@
     z-index: 1500;
     width: 36rem;
     max-width: calc(100vw - 2.4rem);
+    // Caps modal height so the body scrolls rather than overflows off-screen
+    max-height: calc(100vh - 10rem);
+    display: flex;
+    flex-direction: column;
     background: var(--general-main-2, #1e293b);
     border: 1px solid var(--general-section-1, #334155);
     border-radius: 1.2rem;
@@ -169,6 +173,19 @@
 
     &__body {
         padding: 1.2rem 1.6rem 1.6rem;
+        overflow-y: auto;
+        flex: 1; // takes remaining height inside the flex modal
+
+        // Custom scrollbar — thin & subtle
+        scrollbar-width: thin;
+        scrollbar-color: var(--general-section-1, #334155) transparent;
+
+        &::-webkit-scrollbar { width: 4px; }
+        &::-webkit-scrollbar-track { background: transparent; }
+        &::-webkit-scrollbar-thumb {
+            background: var(--general-section-1, #334155);
+            border-radius: 2px;
+        }
     }
 
     &__strategy-header {
@@ -449,19 +466,35 @@
     // ── Action buttons ──────────────────────────────────────────────────────
 
     &__actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+    }
+
+    // Scan Markets sits full-width on its own row; Load Bot + Load & Run share a row
+    &__actions-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 0.8rem;
+        gap: 0.7rem;
     }
 
     &__btn {
         padding: 0.9rem 0;
         border-radius: 0.8rem;
         border: none;
-        font-size: 1.25rem;
+        font-size: 1.2rem;
         font-weight: 700;
         cursor: pointer;
         transition: all 0.15s;
+        width: 100%;
+
+        &--scan {
+            background: #3b82f6;
+            color: #fff;
+
+            &:hover:not(:disabled) { background: #2563eb; }
+            &:active:not(:disabled) { transform: scale(0.98); }
+        }
 
         &--primary {
             background: #3b82f6;
@@ -477,6 +510,21 @@
             border: 1.5px solid var(--general-section-1, #334155);
 
             &:hover:not(:disabled) { background: var(--general-section-2, #334155); }
+            &:active:not(:disabled) { transform: scale(0.98); }
+
+            &:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+        }
+
+        // Green "Load & Run" button
+        &--success {
+            background: #10b981;
+            color: #fff;
+            border: none;
+
+            &:hover:not(:disabled) { background: #059669; }
             &:active:not(:disabled) { transform: scale(0.98); }
 
             &:disabled {

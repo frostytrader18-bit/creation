@@ -254,55 +254,75 @@ const AiScanner = () => {
         }
     };
 
-    const handleLoadBot = async () => {
+    const buildAndLoadBot = async (): Promise<void> => {
         if (!bestResult) return;
 
-        try {
-            const xml_module = await import(`../../xml/${strategy.xmlFile}.xml`);
-            let block_string: string = xml_module.default;
+        const xml_module = await import(`../../xml/${strategy.xmlFile}.xml`);
+        let block_string: string = xml_module.default;
 
-            const opts: InjectOpts = {
-                symbol: bestResult.symbol,
-                stake,
-                martingale,
-                takeProfit,
-                stopLoss,
-                predictionDigit: strategy.predictionDigit ?? undefined,
-                tradeType: bestResult.tradeType,
-            };
+        const opts: InjectOpts = {
+            symbol: bestResult.symbol,
+            stake,
+            martingale,
+            takeProfit,
+            stopLoss,
+            predictionDigit: strategy.predictionDigit ?? undefined,
+            tradeType: bestResult.tradeType,
+        };
 
-            block_string = strategy.id === 'evenodd'
-                ? injectEvenOddParams(block_string, opts)
-                : injectOverUnderParams(block_string, opts);
+        block_string = strategy.id === 'evenodd'
+            ? injectEvenOddParams(block_string, opts)
+            : injectOverUnderParams(block_string, opts);
 
-            if (store?.dashboard) store.dashboard.setActiveTab(DBOT_TABS.BOT_BUILDER);
-            setIsOpen(false);
+        if (store?.dashboard) store.dashboard.setActiveTab(DBOT_TABS.BOT_BUILDER);
+        setIsOpen(false);
 
-            const doLoad = async (workspace: any) => {
-                await load({
-                    block_string,
-                    workspace,
-                    file_name: strategy.botName,
-                    from: save_types.LOCAL,
-                    show_snackbar: true,
-                    drop_event: undefined,
-                    strategy_id: undefined,
-                    showIncompatibleStrategyDialog: undefined,
-                });
-            };
+        const doLoad = async (workspace: any) => {
+            await load({
+                block_string,
+                workspace,
+                file_name: strategy.botName,
+                from: save_types.LOCAL,
+                show_snackbar: true,
+                drop_event: undefined,
+                strategy_id: undefined,
+                showIncompatibleStrategyDialog: undefined,
+            });
+        };
 
-            const workspace = (window as any).Blockly?.derivWorkspace;
-            if (workspace) {
-                await doLoad(workspace);
-            } else {
+        const workspace = (window as any).Blockly?.derivWorkspace;
+        if (workspace) {
+            await doLoad(workspace);
+        } else {
+            await new Promise<void>(resolve => {
                 setTimeout(async () => {
                     const ws = (window as any).Blockly?.derivWorkspace;
                     if (ws) await doLoad(ws);
+                    resolve();
                 }, 800);
-            }
+            });
+        }
+    };
+
+    const handleLoadBot = async () => {
+        try {
+            await buildAndLoadBot();
         } catch (err) {
             // eslint-disable-next-line no-console
             console.error('[AiScanner] Failed to load bot XML:', err);
+        }
+    };
+
+    const handleLoadAndRun = async () => {
+        try {
+            await buildAndLoadBot();
+            // Give the workspace a moment to fully initialise before running
+            setTimeout(() => {
+                store?.run_panel?.onRunButtonClick?.();
+            }, 600);
+        } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[AiScanner] Failed to load and run bot:', err);
         }
     };
 
@@ -483,16 +503,28 @@ const AiScanner = () => {
 
                         {/* Action buttons */}
                         <div className='ai-scanner-modal__actions'>
-                            <button className='ai-scanner-modal__btn ai-scanner-modal__btn--primary' onClick={handleScan}>
+                            <button
+                                className='ai-scanner-modal__btn ai-scanner-modal__btn--primary ai-scanner-modal__btn--scan'
+                                onClick={handleScan}
+                            >
                                 {scanState === 'scanning' ? 'Stop Scan' : 'Scan Markets'}
                             </button>
-                            <button
-                                className='ai-scanner-modal__btn ai-scanner-modal__btn--secondary'
-                                onClick={handleLoadBot}
-                                disabled={scanState !== 'done' || !bestResult}
-                            >
-                                Load Bot
-                            </button>
+                            <div className='ai-scanner-modal__actions-row'>
+                                <button
+                                    className='ai-scanner-modal__btn ai-scanner-modal__btn--secondary'
+                                    onClick={handleLoadBot}
+                                    disabled={scanState !== 'done' || !bestResult}
+                                >
+                                    Load Bot
+                                </button>
+                                <button
+                                    className='ai-scanner-modal__btn ai-scanner-modal__btn--success'
+                                    onClick={handleLoadAndRun}
+                                    disabled={scanState !== 'done' || !bestResult}
+                                >
+                                    ▶ Load &amp; Run
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
