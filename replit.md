@@ -21,6 +21,8 @@ npm run dev
 
 The app runs at `http://localhost:5000` (configured via Rsbuild).
 
+> **Note (Replit setup):** The original `package-lock.json` listed `npm@10.9.8` as a standalone install target, which the Replit Package Firewall blocked (405). The lock file was deleted and regenerated; `npm@10.9.8` is still present transitively via `@deriv-com/quill-ui` → `@deriv-com/quill-tokens` → `semantic-release`, but now correctly flagged as a `bundleDependencies` entry (shipped inside its parent tarball, never downloaded separately) — so `npm install` succeeds without firewall errors.
+
 ## Environment variables
 
 These are baked in at build time via `rsbuild.config.ts` → `source.define`. Set them before building:
