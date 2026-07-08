@@ -19,11 +19,30 @@ window.Blockly.Blocks.purchase = {
                     options: [['', '']],
                 },
             ],
+            message1: localize('Allow Bulk Purchase: %1  No. of Trades: %2'),
+            args1: [
+                {
+                    type: 'field_dropdown',
+                    name: 'ALLOW_BULK',
+                    options: [
+                        [localize('No'), 'no'],
+                        [localize('Yes'), 'yes'],
+                    ],
+                },
+                {
+                    type: 'field_number',
+                    name: 'BULK_COUNT',
+                    value: 2,
+                    min: 2,
+                    max: 50,
+                    precision: 1,
+                },
+            ],
             previousStatement: null,
             colour: window.Blockly.Colours.Special1.colour,
             colourSecondary: window.Blockly.Colours.Special1.colourSecondary,
             colourTertiary: window.Blockly.Colours.Special1.colourTertiary,
-            tooltip: localize('This block purchases contract of a specified type.'),
+            tooltip: localize('This block purchases contract of a specified type. Enable Bulk Purchase to buy multiple contracts simultaneously.'),
             category: window.Blockly.Categories.Before_Purchase,
         };
     },
@@ -85,6 +104,13 @@ window.Blockly.Blocks.purchase = {
 
 window.Blockly.JavaScript.javascriptGenerator.forBlock.purchase = block => {
     const purchaseList = block.getFieldValue('PURCHASE_LIST');
+    const allowBulk   = block.getFieldValue('ALLOW_BULK');
+    const bulkCount   = parseInt(block.getFieldValue('BULK_COUNT') || '2', 10);
+
+    if (allowBulk === 'yes' && bulkCount >= 2) {
+        const code = `Bot.purchaseBulk('${purchaseList}', ${bulkCount});\n`;
+        return code;
+    }
 
     const code = `Bot.purchase('${purchaseList}');\n`;
     return code;

@@ -133,6 +133,11 @@ const Interpreter = () => {
         );
         js_interpreter.setProperty(
             pseudo_bot_interface,
+            'purchaseBulk',
+            createAsync(js_interpreter, bot_interface.purchaseBulk)
+        );
+        js_interpreter.setProperty(
+            pseudo_bot_interface,
             'sellAtMarket',
             createAsync(js_interpreter, bot_interface.sellAtMarket)
         );
@@ -167,7 +172,8 @@ const Interpreter = () => {
                     timeout => global_timeouts[timeout].is_cancellable
                 );
 
-                if (!bot.tradeEngine.contractId && is_timeouts_cancellable) {
+                const hasBulkActive = bot.tradeEngine.bulkContractIds?.length > 0;
+                if (!bot.tradeEngine.contractId && !hasBulkActive && is_timeouts_cancellable) {
                     api_base.is_stopping = true;
                     // When user is rate limited, allow them to stop the bot immediately
                     // granted there is no active contract.

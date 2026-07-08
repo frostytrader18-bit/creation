@@ -51,6 +51,7 @@ import RunStrategy from '../dashboard/run-strategy';
 import FreeBots from '../free-bots';
 import AnalysisTools from '../analysis';
 import CopyTrading from '../copy-trading';
+import BulkTrader from '../bulk-trader';
 import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
@@ -87,7 +88,7 @@ const AppWrapper = observer(() => {
     const { clear } = summary_card;
     const { DASHBOARD, BOT_BUILDER } = DBOT_TABS;
     const init_render = React.useRef(true);
-    const hash = ['dashboard', 'bot_builder', 'free_bots', 'd_circles', 'analysis_tool', 'market_analyzer', 'chart', 'trading_view', 'copy_trading', 'analysis', 'tutorial'];
+    const hash = ['dashboard', 'bot_builder', 'free_bots', 'd_circles', 'analysis_tool', 'market_analyzer', 'chart', 'trading_view', 'copy_trading', 'analysis', 'tutorial', 'bulk_trader'];
     const { isDesktop } = useDevice();
     const location = useLocation();
     const navigate = useNavigate();
@@ -577,6 +578,19 @@ const AppWrapper = observer(() => {
                                         <Tutorial handleTabChange={handleTabChange} />
                                     </Suspense>
                                 </div>
+                            </div>
+                            <div
+                                label={
+                                    <>
+                                        <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='var(--text-general)' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                                            <polygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2' />
+                                        </svg>
+                                        <Localize i18n_default_text='Bulk Trader' />
+                                    </>
+                                }
+                                id='id-bulk-trader'
+                            >
+                                <BulkTrader />
                             </div>
                         </Tabs>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}{' '}

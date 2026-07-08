@@ -114,6 +114,78 @@ export default Engine =>
                 delayIndex++
             ).then(onSuccess);
         }
+
+        // ── Bulk Purchase ──────────────────────────────────────────────────────
+        purchaseBulk(contract_type, count = 2) {
+            if (this.store.getState().scope !== BEFORE_PURCHASE) {
+                return Promise.resolve();
+            }
+
+            // Clamp count to a sane range
+            const n = Math.max(2, Math.min(50, Math.round(count)));
+
+            // Reset bulk tracking state
+            this.bulkContractIds = [];
+            this.bulkTotalCount  = n;
+            this.bulkSettledCount = 0;
+            this.isSold = false;
+
+            contractStatus({
+                id: 'contract.purchase_sent',
+                data: this.tradeOptions.amount,
+            });
+
+            const trade_option = tradeOptionToBuy(contract_type, this.tradeOptions);
+
+            // Fire N buy requests in parallel before scope transition
+            const buys = Array.from({ length: n }, () =>
+                doUntilDone(() => api_base.api.send(trade_option))
+            );
+
+            // Use allSettled so a partial failure doesn't abort contract tracking
+            return Promise.allSettled(buys).then(results => {
+                results.forEach(result => {
+                    if (result.status !== 'fulfilled') {
+                        // Log individual buy failure but continue tracking the rest
+                        console.warn('[BulkPurchase] one buy failed:', result.reason);
+                        return;
+                    }
+                    const { buy } = result.value;
+                    this.bulkContractIds.push(buy.contract_id);
+
+                    contractStatus({
+                        id: 'contract.purchase_received',
+                        data: buy.transaction_id,
+                        buy,
+                    });
+
+                    log(LogTypes.PURCHASE, { transaction_id: buy.transaction_id });
+                    info({
+                        accountID: this.accountInfo.loginid,
+                        totalRuns: this.updateAndReturnTotalRuns(),
+                        transaction_ids: { buy: buy.transaction_id },
+                        contract_type,
+                        buy_price: buy.buy_price,
+                    });
+                });
+
+                delayIndex = 0;
+
+                if (this.bulkContractIds.length === 0) {
+                    // Every buy failed — reset state so engine can recover
+                    this.bulkTotalCount  = 0;
+                    this.bulkSettledCount = 0;
+                    throw new Error('BulkPurchaseFailed: all buy requests failed');
+                }
+
+                // Update the expected settled count to only the contracts we actually bought
+                this.bulkTotalCount = this.bulkContractIds.length;
+
+                // Transition scope once — after all successful buys are registered
+                this.store.dispatch(purchaseSuccessful());
+            });
+        }
+
         getPurchaseReference = () => purchase_reference;
         regeneratePurchaseReference = () => {
             purchase_reference = getUUID();
