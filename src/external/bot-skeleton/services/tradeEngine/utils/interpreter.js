@@ -210,6 +210,23 @@ const Interpreter = () => {
             try {
                 $scope.stopped = true;
                 $scope.is_error_triggered = false;
+
+                // Force-resolve any pending watchDuring Promise so the interpreter
+                // can exit cleanly instead of hanging forever.
+                //
+                // watchDuring blocks on two conditions:
+                //   1. scope must reach STOP  → dispatch raw SELL (bypasses thunk guard)
+                //   2. tick gate must advance → dispatch synthetic NEW_TICK
+                //
+                // Without this, clicking Stop while bulk contracts are open leaves the
+                // JS interpreter suspended in an unresolvable async-await, freezing the
+                // Run/Stop button state permanently.
+                const tradeStore = bot?.tradeEngine?.store;
+                if (tradeStore) {
+                    tradeStore.dispatch({ type: 'SELL' });
+                    tradeStore.dispatch({ type: 'NEW_TICK', payload: Date.now() + Math.random() });
+                }
+
                 globalObserver.emit('bot.stop');
                 const { ticksService } = $scope;
                 // Unsubscribe previous ticks_history subscription
