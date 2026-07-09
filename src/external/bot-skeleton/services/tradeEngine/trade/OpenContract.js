@@ -2,6 +2,7 @@ import { getRoundedNumber } from '@/components/shared';
 import { api_base } from '../../api/api-base';
 import { contract as broadcastContract, contractStatus } from '../utils/broadcast';
 import { openContractReceived, sell } from './state/actions';
+import { NEW_TICK } from './state/constants';
 
 export default Engine =>
     class OpenContract extends Engine {
@@ -48,7 +49,14 @@ export default Engine =>
                                 if (this.afterPromise) {
                                     this.afterPromise();
                                 }
+
+                                // Dispatch sell() first to move scope to STOP, then
+                                // dispatch a synthetic NEW_TICK to unblock the watchDuring
+                                // tick gate.  Without this, watchDuring can only resolve on
+                                // the next real market tick — which can take 1-2 seconds and
+                                // makes the bot appear to hang after bulk trades.
                                 this.store.dispatch(sell());
+                                this.store.dispatch({ type: NEW_TICK, payload: Date.now() + Math.random() });
                             }
                         } else {
                             // ── Single-contract (normal) mode ─────────────────────────

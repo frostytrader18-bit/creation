@@ -136,10 +136,12 @@ export default Engine =>
             });
 
             const trade_option = tradeOptionToBuy(contract_type, this.tradeOptions);
-            // subscribe: 1 is required so Deriv streams proposal_open_contract updates
-            // back for each bought contract — without it observeOpenContract never fires
-            // and the engine hangs forever in DURING_PURCHASE scope.
-            const buy_option = { ...trade_option, subscribe: 1 };
+
+            // NOTE: Do NOT add subscribe: 1 to the buy request.
+            // The Deriv API only honours subscribe on proposal-ID buys, not on
+            // parameter-based direct buys.  We subscribe explicitly via
+            // proposal_open_contract after the contracts are confirmed (below).
+            const buy_option = { ...trade_option };
 
             // Fire N buy requests in parallel before scope transition
             const buys = Array.from({ length: n }, () =>
@@ -189,10 +191,21 @@ export default Engine =>
                 this.store.dispatch(purchaseSuccessful());
 
                 // Renew proposal subscriptions so the next trade cycle gets fresh prices.
-                // Mirror the same post-dispatch renewal that purchase() does.
                 if (this.is_proposal_subscription_required) {
                     this.renewProposalsOnPurchase();
                 }
+
+                // Explicitly subscribe to proposal_open_contract for each bought contract.
+                // This is the only reliable way to get streaming settlement updates for
+                // parameter-based direct buys — subscribe:1 on the buy request itself is
+                // ignored by the API for this buy format.
+                this.bulkContractIds.forEach(contract_id => {
+                    doUntilDone(() =>
+                        api_base.api.send({ proposal_open_contract: 1, contract_id, subscribe: 1 })
+                    ).catch(err => {
+                        console.warn('[BulkPurchase] POC subscription failed for', contract_id, err);
+                    });
+                });
             });
         }
 
